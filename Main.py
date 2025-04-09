@@ -35,8 +35,7 @@ def install_required_tools():
         "sqlmap": "git clone https://github.com/sqlmapproject/sqlmap.git && cd sqlmap && pip install -r requirements.txt",
         "nikto": "apt-get install nikto",
         "dirsearch": "git clone https://github.com/maurosoria/dirsearch.git",
-        "zap-cli": "pip install owasp-zap-v2.4",
-        "burp_suite": "wget https://portswigger.net/burp/releases/download?product=community&type=linux -O burpsuite_free_v2021.11.1.sh && chmod +x burpsuite_free_v2021.11.1.sh && ./burpsuite_free_v2021.11.1.sh"
+        "arjun": "git clone https://github.com/s0md3v/Arjun.git",
     }
     
     for tool, command in tools.items():
@@ -74,15 +73,11 @@ def scan_vulnerabilities():
         sqlmap_command = f"sqlmap -u http://{subdomain} --batch --output-dir=results/sqlmap/{subdomain}"
         run_tool(sqlmap_command, f"results/sqlmap/{subdomain}.txt")
 
-        # فحص XSS باستخدام Burp Suite
-        burp_command = f"burpsuite -u http://{subdomain} --scan xss --output results/burp/{subdomain}_xss.txt"
-        run_tool(burp_command, f"results/burp/{subdomain}_xss.txt")
+        # فحص XSS باستخدام Arjun
+        arjun_command = f"python3 Arjun/arjun.py -u http://{subdomain}"
+        run_tool(arjun_command, f"results/arjun/{subdomain}_xss.txt")
 
-        # فحص CSRF باستخدام OWASP ZAP
-        zap_command = f"zap-cli quick-scan http://{subdomain} --output results/zap/{subdomain}_csrf.txt"
-        run_tool(zap_command, f"results/zap/{subdomain}_csrf.txt")
-
-        # فحص التكوينات غير الآمنة باستخدام Nikto
+        # فحص CSRF باستخدام Nikto
         nikto_command = f"nikto -h http://{subdomain} -o results/nikto/{subdomain}_config.txt"
         run_tool(nikto_command, f"results/nikto/{subdomain}_config.txt")
 
