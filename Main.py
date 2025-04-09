@@ -1,6 +1,5 @@
 import os
 import subprocess
-import sys
 
 # دالة لتحميل وتثبيت الأدوات إذا لم تكن موجودة
 def install_tool(tool_name, install_command):
@@ -16,7 +15,36 @@ def install_tool(tool_name, install_command):
     except Exception as e:
         print(f"[!] Error installing {tool_name}: {str(e)}")
 
-# دالة لتشغيل الأدوات
+# دالة لتحميل Wordlists
+def download_wordlists():
+    wordlist_url = "https://github.com/danielmiessler/SecLists/archive/master.zip"
+    try:
+        if not os.path.exists("SecLists-master"):
+            print("[*] Downloading SecLists Wordlists...")
+            subprocess.run(f"wget {wordlist_url} -O SecLists.zip", shell=True)
+            subprocess.run("unzip SecLists.zip", shell=True)
+            print("[+] SecLists Wordlists downloaded and extracted.")
+        else:
+            print("[+] Wordlists already downloaded.")
+    except Exception as e:
+        print(f"[!] Error downloading Wordlists: {str(e)}")
+
+# دالة لتثبيت الأدوات
+def install_required_tools():
+    tools = {
+        "dirsearch": "git clone https://github.com/maurosoria/dirsearch.git",
+        "nikto": "apt-get install nikto -y",
+        "gobuster": "apt-get install gobuster -y",
+        "ffuf": "apt-get install ffuf -y",
+        "arachni": "gem install arachni",
+        "subfinder": "go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest",
+        "amass": "go install github.com/OWASP/Amass/v3@latest"
+    }
+    
+    for tool, command in tools.items():
+        install_tool(tool, command)
+
+# دالة لتشغيل الأداة
 def run_tool(command, output_file):
     try:
         print(f"[*] Running {command}")
@@ -27,101 +55,63 @@ def run_tool(command, output_file):
     except Exception as e:
         print(f"[!] Error: {str(e)}")
 
-# تثبيت الأدوات الضرورية
-def install_required_tools():
-    tools = {
-        "subfinder": "go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest",
-        "amass": "go install github.com/OWASP/Amass/v3@latest",
-        "sqlmap": "git clone https://github.com/sqlmapproject/sqlmap.git && cd sqlmap && pip install -r requirements.txt",
-        "nikto": "apt-get install nikto",
-        "dirsearch": "git clone https://github.com/maurosoria/dirsearch.git",
-        "arjun": "git clone https://github.com/s0md3v/Arjun.git",
-    }
-    
-    for tool, command in tools.items():
-        install_tool(tool, command)
+# دالة لفحص الأدوات واستخدامها
+def run_scans(domain):
+    print(f"[*] Running scans for {domain}")
 
-# فحص subdomains المكتشفة
-def scan_subdomains(domain):
-    print(f"[*] Scanning subdomains for {domain}")
-
-    # تشغيل أدوات اكتشاف النطاقات الفرعية
+    # استخدام Subfinder
     subfinder_command = f"subfinder -d {domain} -o results/subfinder.txt"
-    amass_command = f"amass enum -d {domain} -o results/amass.txt"
     run_tool(subfinder_command, "results/subfinder.txt")
+
+    # استخدام Amass
+    amass_command = f"amass enum -d {domain} -o results/amass.txt"
     run_tool(amass_command, "results/amass.txt")
 
-    # دمج النطاقات الفرعية
+    # دمج النتائج من الأدوات
     with open("results/final_subdomains.txt", "w") as final_file:
         with open("results/subfinder.txt", "r") as f:
             final_file.write(f.read())
         with open("results/amass.txt", "r") as f:
             final_file.write(f.read())
 
-    print(f"[*] Finished scanning subdomains for {domain}")
+    # استخدام Dirsearch
+    dirsearch_command = f"python3 dirsearch/dirsearch.py -u http://{domain} -w SecLists-master/Discovery/Web-Content/common.txt -o results/dirsearch.txt"
+    run_tool(dirsearch_command, "results/dirsearch.txt")
 
-# فحص الثغرات على كل subdomain
-def scan_vulnerabilities():
-    with open("results/final_subdomains.txt", "r") as f:
-        subdomains = f.readlines()
+    # استخدام Gobuster
+    gobuster_command = f"gobuster dir -u http://{domain} -w SecLists-master/Discovery/Web-Content/common.txt -o results/gobuster.txt"
+    run_tool(gobuster_command, "results/gobuster.txt")
 
-    # التأكد من وجود أسماء نطاقات فرعية صالحة
-    subdomains = [sub.strip() for sub in subdomains if sub.strip()]
+    # استخدام FFUF
+    ffuf_command = f"ffuf -u http://{domain}/FUZZ -w SecLists-master/Discovery/Web-Content/common.txt -o results/ffuf.txt"
+    run_tool(ffuf_command, "results/ffuf.txt")
 
-    if not subdomains:
-        print("[!] No valid subdomains found to scan.")
-        return
+    # استخدام Nikto
+    nikto_command = f"nikto -h http://{domain} -o results/nikto.txt"
+    run_tool(nikto_command, "results/nikto.txt")
 
-    for subdomain in subdomains:
-        print(f"[*] Scanning {subdomain} for vulnerabilities...")
+    # استخدام Arachni
+    arachni_command = f"arachni http://{domain} --output-dir=results/arachni"
+    run_tool(arachni_command, "results/arachni.txt")
 
-        # فحص SQLi باستخدام SQLmap
-        sqlmap_command = f"sqlmap -u http://{subdomain} --batch --output-dir=results/sqlmap/{subdomain}"
-        run_tool(sqlmap_command, f"results/sqlmap/{subdomain}.txt")
-
-        # فحص XSS باستخدام Arjun
-        arjun_command = f"python3 Arjun/arjun.py -u http://{subdomain}"
-        run_tool(arjun_command, f"results/arjun/{subdomain}_xss.txt")
-
-        # فحص CSRF باستخدام Nikto
-        nikto_command = f"nikto -h http://{subdomain} -o results/nikto/{subdomain}_config.txt"
-        run_tool(nikto_command, f"results/nikto/{subdomain}_config.txt")
-
-        # فحص تجاوز الدليل باستخدام Dirsearch
-        dirsearch_command = f"python3 dirsearch/dirsearch.py -u http://{subdomain} -e php,html,txt -w dirsearch/db/dicc.txt -o results/dirsearch/{subdomain}.txt"
-        run_tool(dirsearch_command, f"results/dirsearch/{subdomain}.txt")
-
-        print(f"[*] Finished scanning {subdomain}.")
-
-# دمج جميع النتائج في تقرير واحد
-def generate_report():
-    with open("results/final_report.txt", "w") as final_report:
-        for folder in os.listdir("results"):
-            folder_path = os.path.join("results", folder)
-            if os.path.isdir(folder_path):
-                for file in os.listdir(folder_path):
-                    with open(os.path.join(folder_path, file), "r") as f:
-                        final_report.write(f.read() + "\n")
-    print("[*] Final report generated at results/final_report.txt.")
+    print(f"[*] Scans completed for {domain}")
 
 # الدالة الرئيسية لتشغيل الأداة
 def main():
     # تثبيت الأدوات المطلوبة
     install_required_tools()
 
+    # تحميل Wordlists
+    download_wordlists()
+
+    # طلب إدخال النطاق المستهدف من المستخدم
     domain = input("Enter the target domain (e.g., defense.tn): ")
     
     # إنشاء مجلد لتخزين النتائج
     os.makedirs("results", exist_ok=True)
 
-    # 1. فحص subdomains
-    scan_subdomains(domain)
-    
-    # 2. فحص الثغرات
-    scan_vulnerabilities()
-    
-    # 3. إنشاء تقرير شامل
-    generate_report()
+    # تشغيل فحص الأدوات
+    run_scans(domain)
 
 if __name__ == "__main__":
     main()
