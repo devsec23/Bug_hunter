@@ -65,8 +65,14 @@ def scan_vulnerabilities():
     with open("results/final_subdomains.txt", "r") as f:
         subdomains = f.readlines()
 
+    # التأكد من وجود أسماء نطاقات فرعية صالحة
+    subdomains = [sub.strip() for sub in subdomains if sub.strip()]
+
+    if not subdomains:
+        print("[!] No valid subdomains found to scan.")
+        return
+
     for subdomain in subdomains:
-        subdomain = subdomain.strip()
         print(f"[*] Scanning {subdomain} for vulnerabilities...")
 
         # فحص SQLi باستخدام SQLmap
