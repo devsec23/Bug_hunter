@@ -1,116 +1,67 @@
 import os
 import subprocess
-import sys
 
-# دالة لتحميل وتثبيت الأدوات إذا لم تكن موجودة
-def install_tool(tool_name, install_command):
-    try:
-        # تحقق إذا كانت الأداة موجودة
-        result = subprocess.run(f"which {tool_name}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        
-        if result.returncode != 0:
-            print(f"[!] {tool_name} not found, installing...")
-            subprocess.run(install_command, shell=True)
+# الأدوات المطلوبة
+tools = {
+    "subfinder": "subfinder",
+    "amass": "amass",
+    "sqlmap": "sqlmap/sqlmap.py",
+    "nikto": "nikto",
+    "arachni": "arachni"
+}
+
+# إنشاء مجلدات النتائج
+os.makedirs("results/sqlmap", exist_ok=True)
+os.makedirs("results/nikto", exist_ok=True)
+os.makedirs("results/arachni", exist_ok=True)
+
+# التحقق من تثبيت الأدوات أو محاولة تثبيتها
+for tool, path in tools.items():
+    if os.path.exists(path) or subprocess.call(f"which {tool}", shell=True, stdout=subprocess.DEVNULL) == 0:
+        print(f"[+] {tool} is already installed.")
+    else:
+        print(f"[!] {tool} not found, installing...")
+        if tool == "sqlmap":
+            os.system("git clone https://github.com/sqlmapproject/sqlmap.git")
+        elif tool == "arachni":
+            print("[!] Arachni requires manual install or Docker. Skipping...")
         else:
-            print(f"[+] {tool_name} is already installed.")
-    except Exception as e:
-        print(f"[!] Error installing {tool_name}: {str(e)}")
+            os.system(f"apt install -y {tool}")
 
-# دالة لتشغيل الأدوات
-def run_tool(command, output_file):
-    try:
-        print(f"[*] Running {command}")
-        result = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        with open(output_file, "w") as f:
-            f.write(result.stdout.decode())
-        print(f"[*] Results saved to {output_file}")
-    except Exception as e:
-        print(f"[!] Error: {str(e)}")
+# إدخال الموقع
+target = input("Enter the target domain (e.g., example.com): ").strip()
+print(f"[*] Scanning subdomains for {target}")
 
-# تثبيت الأدوات الضرورية
-def install_required_tools():
-    tools = {
-        "subfinder": "go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest",
-        "amass": "go install github.com/OWASP/Amass/v3@latest",
-        "sqlmap": "git clone https://github.com/sqlmapproject/sqlmap.git && cd sqlmap && pip install -r requirements.txt",
-        "nikto": "apt-get install nikto",
-        "arachni": "gem install arachni"
-    }
-    
-    for tool, command in tools.items():
-        install_tool(tool, command)
+# تشغيل subfinder و amass
+os.system(f"subfinder -d {target} -o results/subfinder.txt")
+os.system(f"amass enum -d {target} -o results/amass.txt")
 
-# فحص subdomains المكتشفة
-def scan_subdomains(domain):
-    print(f"[*] Scanning subdomains for {domain}")
+# دمج النتائج + إضافة الدومين الرئيسي
+all_domains = set()
+for path in ["results/subfinder.txt", "results/amass.txt"]:
+    with open(path) as f:
+        all_domains.update(line.strip() for line in f if line.strip())
 
-    # تشغيل أدوات اكتشاف النطاقات الفرعية
-    subfinder_command = f"subfinder -d {domain} -o results/subfinder.txt"
-    amass_command = f"amass enum -d {domain} -o results/amass.txt"
-    run_tool(subfinder_command, "results/subfinder.txt")
-    run_tool(amass_command, "results/amass.txt")
+all_domains.add(target)
 
-    # دمج النطاقات الفرعية
-    with open("results/final_subdomains.txt", "w") as final_file:
-        with open("results/subfinder.txt", "r") as f:
-            final_file.write(f.read())
-        with open("results/amass.txt", "r") as f:
-            final_file.write(f.read())
+with open("results/merged_domains.txt", "w") as f:
+    for domain in sorted(all_domains):
+        f.write(domain + "\n")
 
-    print(f"[*] Finished scanning subdomains for {domain}")
+print(f"[*] Total discovered domains (including main domain): {len(all_domains)}")
 
-# فحص الثغرات على كل subdomain
-def scan_vulnerabilities():
-    with open("results/final_subdomains.txt", "r") as f:
-        subdomains = f.readlines()
+# الفحص لكل نطاق
+for domain in all_domains:
+    print(f"[*] Scanning {domain} for vulnerabilities...")
+    url = f"http://{domain}"
 
-    for subdomain in subdomains:
-        subdomain = subdomain.strip()
-        print(f"[*] Scanning {subdomain} for vulnerabilities...")
+    sqlmap_out = f"results/sqlmap/{domain}.txt"
+    os.system(f"python3 sqlmap/sqlmap.py -u {url} --batch --output-dir=results/sqlmap/{domain} > {sqlmap_out} 2>&1")
 
-        # فحص SQLi باستخدام SQLmap
-        sqlmap_command = f"sqlmap -u http://{subdomain} --batch --output-dir=results/sqlmap/{subdomain}"
-        run_tool(sqlmap_command, f"results/sqlmap/{subdomain}.txt")
+    arachni_out = f"results/arachni/{domain}.txt"
+    os.system(f"echo '[!] Skipping arachni scan for {domain} (cloud shell limitation)' > {arachni_out}")
 
-        # فحص XSS باستخدام Arachni
-        arachni_command = f"arachni http://{subdomain} --output-dir=results/arachni/{subdomain} --report-save-file=results/arachni/{subdomain}_report.afr"
-        run_tool(arachni_command, f"results/arachni/{subdomain}_report.afr")
+    nikto_out = f"results/nikto/{domain}.txt"
+    os.system(f"nikto -h {url} -o {nikto_out}")
 
-        # فحص التكوينات غير الآمنة باستخدام Nikto
-        nikto_command = f"nikto -h http://{subdomain} -o results/nikto/{subdomain}_config.txt"
-        run_tool(nikto_command, f"results/nikto/{subdomain}_config.txt")
-
-        print(f"[*] Finished scanning {subdomain}.")
-
-# دمج جميع النتائج في تقرير واحد
-def generate_report():
-    with open("results/final_report.txt", "w") as final_report:
-        for folder in os.listdir("results"):
-            folder_path = os.path.join("results", folder)
-            if os.path.isdir(folder_path):
-                for file in os.listdir(folder_path):
-                    with open(os.path.join(folder_path, file), "r") as f:
-                        final_report.write(f.read() + "\n")
-    print("[*] Final report generated at results/final_report.txt.")
-
-# الدالة الرئيسية لتشغيل الأداة
-def main():
-    # تثبيت الأدوات المطلوبة
-    install_required_tools()
-
-    domain = input("Enter the target domain (e.g., defense.tn): ")
-    
-    # إنشاء مجلد لتخزين النتائج
-    os.makedirs("results", exist_ok=True)
-
-    # 1. فحص subdomains
-    scan_subdomains(domain)
-    
-    # 2. فحص الثغرات
-    scan_vulnerabilities()
-    
-    # 3. إنشاء تقرير شامل
-    generate_report()
-
-if __name__ == "__main__":
-    main()
+print("[*] All scans finished. Check results folder.")
